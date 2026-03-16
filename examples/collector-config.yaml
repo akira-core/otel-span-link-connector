@@ -1,0 +1,57 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+connectors:
+  # Existing servicegraph connector — derives edges from parent-child spans
+  servicegraph:
+    latency_histogram_buckets: [5ms, 10ms, 25ms, 50ms, 100ms, 250ms, 500ms, 1s, 2s, 5s, 10s]
+    store:
+      ttl: 10s
+      max_items: 1000
+
+  # Span Link Service Graph — derives edges from span links
+  spanlinkservicegraph:
+    latency_histogram_buckets: [5ms, 10ms, 25ms, 50ms, 100ms, 250ms, 500ms, 1s, 2s, 5s, 10s]
+    dimensions:
+      - name: messaging_system
+        source_attribute: messaging.system
+      - name: messaging_destination
+        source_attribute: messaging.destination.name
+      - name: db_system
+        source_attribute: db.system
+      - name: db_namespace
+        source_attribute: db.namespace
+      - name: link_type
+        source_attribute: link_type
+    store:
+      ttl: 30s
+      max_items: 10000
+    cache_loop: 1m
+    store_expiration_loop: 2s
+    metrics_flush_interval: 60s
+
+exporters:
+  prometheusremotewrite:
+    endpoint: http://victoriametrics:8428/api/v1/write
+
+  debug:
+    verbosity: detailed
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: [servicegraph, spanlinkservicegraph]
+
+    metrics/servicegraph:
+      receivers: [servicegraph]
+      exporters: [prometheusremotewrite, debug]
+
+    metrics/spanlinkgraph:
+      receivers: [spanlinkservicegraph]
+      exporters: [prometheusremotewrite, debug]
