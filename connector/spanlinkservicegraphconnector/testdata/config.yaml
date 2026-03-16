@@ -1,0 +1,13 @@
+spanlinkservicegraph:
+  latency_histogram_buckets: [5ms, 10ms, 25ms, 50ms, 100ms, 250ms, 500ms, 1s, 2s, 5s, 10s]
+  dimensions:
+    - name: messaging_system
+      source_attribute: messaging.system
+    - name: link_type
+      source_attribute: link_type
+  store:
+    ttl: 30s
+    max_items: 10000
+  cache_loop: 1m
+  store_expiration_loop: 2s
+  metrics_flush_interval: 60s

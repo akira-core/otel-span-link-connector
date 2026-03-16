@@ -1,0 +1,48 @@
+type: spanlinkservicegraph
+display_name: Span Link Service Graph Connector
+
+status:
+  class: connector
+  stability:
+    development: [traces_to_metrics]
+  distributions: []
+  codeowners:
+    active: []
+
+tests:
+  config:
+
+telemetry:
+  metrics:
+    connector_spanlinkservicegraph_total_edges:
+      description: Total number of link edges resolved
+      unit: "1"
+      enabled: true
+      stability: development
+      sum:
+        value_type: int
+        monotonic: true
+    connector_spanlinkservicegraph_expired_spans:
+      description: Number of indexed spans expired before being linked
+      unit: "1"
+      enabled: true
+      stability: development
+      sum:
+        value_type: int
+        monotonic: true
+    connector_spanlinkservicegraph_expired_pending_links:
+      description: Number of pending links expired before resolution
+      unit: "1"
+      enabled: true
+      stability: development
+      sum:
+        value_type: int
+        monotonic: true
+    connector_spanlinkservicegraph_dropped_spans:
+      description: Number of spans dropped due to store capacity
+      unit: "1"
+      enabled: true
+      stability: development
+      sum:
+        value_type: int
+        monotonic: true
