@@ -49,6 +49,9 @@ type serviceGraphConnector struct {
 }
 
 func newConnector(telemetry component.TelemetrySettings, cfg *Config, nextConsumer consumer.Metrics) (*serviceGraphConnector, error) {
+	if nextConsumer == nil {
+		return nil, fmt.Errorf("metrics consumer must not be nil")
+	}
 	c := &serviceGraphConnector{
 		config:          cfg,
 		metricsConsumer: nextConsumer,
