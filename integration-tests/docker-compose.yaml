@@ -1,0 +1,42 @@
+services:
+  nats:
+    image: nats:latest
+    ports: ["4222:4222"]
+
+  mongodb:
+    image: mongo:7
+    ports: ["27017:27017"]
+    command: ["--replSet", "rs0"]
+
+  mongodb-init:
+    image: mongo:7
+    depends_on: [mongodb]
+    entrypoint: ["mongosh", "--host", "mongodb", "--eval", "rs.initiate()"]
+    restart: "no"
+
+  victoriametrics:
+    image: victoriametrics/victoria-metrics:latest
+    ports: ["8428:8428"]
+    command: ["-retentionPeriod=1d", "-httpListenAddr=:8428"]
+
+  collector:
+    build:
+      context: ..
+      dockerfile: integration-tests/collector/Dockerfile
+    depends_on: [victoriametrics]
+    ports: ["4317:4317"]
+
+  testapp:
+    build:
+      context: testapp
+    depends_on: [collector, nats, mongodb-init]
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: collector:4317
+      NATS_URL: nats://nats:4222
+      MONGODB_URI: mongodb://mongodb:27017/?replicaSet=rs0
+
+  verify:
+    build:
+      context: verify
+    environment:
+      VM_URL: http://victoriametrics:8428

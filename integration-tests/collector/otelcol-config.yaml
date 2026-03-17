@@ -1,0 +1,41 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+
+connectors:
+  spanlinkservicegraph:
+    metrics_flush_interval: 5s
+    store:
+      ttl: 30s
+      max_items: 10000
+    dimensions:
+      - name: messaging_system
+        source_attribute: messaging.system
+      - name: messaging_destination
+        source_attribute: messaging.destination
+      - name: db_system
+        source_attribute: db.system
+      - name: db_namespace
+        source_attribute: db.namespace
+      - name: link_type
+        source_attribute: link_type
+
+exporters:
+  prometheusremotewrite:
+    endpoint: http://victoriametrics:8428/api/v1/write
+
+extensions:
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+service:
+  extensions: [zpages]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      connectors: [spanlinkservicegraph]
+    metrics:
+      receivers: [spanlinkservicegraph]
+      exporters: [prometheusremotewrite]
