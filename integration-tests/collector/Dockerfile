@@ -20,7 +20,7 @@ RUN builder --config builder-config.yaml || true
 RUN cd /build/otelcol-dev && \
     go mod edit -replace github.com/qiumingzhi/otel-span-link-connector/connector/spanlinkservicegraphconnector=/src/connector/spanlinkservicegraphconnector && \
     go mod tidy && \
-    go build -o otelcol-spanlink .
+    go build -v -o otelcol-spanlink .
 
 # Stage 2: Minimal runtime image
 FROM gcr.io/distroless/base-debian12:nonroot

@@ -160,6 +160,7 @@ func runScenarioA(ctx context.Context, natsURL string, tr *tracers) {
 	_, consumerSpan := tracerCons.Start(consumerCtx, "consume-order",
 		trace.WithLinks(link),
 	)
+	time.Sleep(2 * time.Millisecond) // ensure server duration > 0 for histogram sum
 	consumerSpan.End()
 
 	_ = producerCtx
@@ -214,6 +215,7 @@ func runScenarioB(ctx context.Context, mongoURI string, tr *tracers) {
 		trace.WithAttributes(attribute.String("db.system", "mongodb")),
 		trace.WithLinks(link),
 	)
+	time.Sleep(2 * time.Millisecond)
 	listenerSpan.End()
 	time.Sleep(100 * time.Millisecond)
 }
@@ -260,6 +262,7 @@ func runScenarioC(ctx context.Context, natsURL string, tr *tracers) {
 		_, consumerSpan := tracerCons.Start(context.Background(), "consume-event",
 			trace.WithLinks(link),
 		)
+		time.Sleep(2 * time.Millisecond)
 		consumerSpan.End()
 	}
 	time.Sleep(100 * time.Millisecond)
@@ -284,6 +287,7 @@ func runScenarioD(ctx context.Context, tr *tracers) {
 	_, consumerSpan := tracerCons.Start(context.Background(), "eager-consumer",
 		trace.WithLinks(link),
 	)
+	time.Sleep(2 * time.Millisecond)
 	consumerSpan.End()
 
 	time.Sleep(2 * time.Second)
@@ -309,6 +313,7 @@ func runScenarioE(ctx context.Context, tr *tracers) {
 	_, retrySpan := tracer.Start(ctx, "order-retry",
 		trace.WithLinks(link),
 	)
+	time.Sleep(2 * time.Millisecond)
 	retrySpan.End()
 	time.Sleep(100 * time.Millisecond)
 }
@@ -362,6 +367,7 @@ func runScenarioF(ctx context.Context, natsURL, mongoURI string, tr *tracers) {
 		trace.WithAttributes(attribute.String("messaging.system", "nats")),
 		trace.WithLinks(link1),
 	)
+	time.Sleep(2 * time.Millisecond)
 	paymentSpan.End()
 
 	// Leg 2: payment-service (writer) -> sync-service (change stream listener)
@@ -391,6 +397,7 @@ func runScenarioF(ctx context.Context, natsURL, mongoURI string, tr *tracers) {
 		trace.WithAttributes(attribute.String("db.system", "mongodb")),
 		trace.WithLinks(link2),
 	)
+	time.Sleep(2 * time.Millisecond)
 	syncSpan.End()
 	time.Sleep(100 * time.Millisecond)
 }

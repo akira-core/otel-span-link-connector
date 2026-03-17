@@ -40,19 +40,40 @@ func queryScalar(t *testing.T, v1api promv1.API, promql string) float64 {
 	return float64(vec[0].Value)
 }
 
+// queryScalarEventually waits for the metric to appear (handles collector flush delay).
+func queryScalarEventually(t *testing.T, v1api promv1.API, promql string, minVal float64) float64 {
+	t.Helper()
+	var val float64
+	require.Eventually(t, func() bool {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		result, warnings, err := v1api.Query(ctx, promql, time.Now())
+		if err != nil || len(warnings) > 0 {
+			return false
+		}
+		vec, ok := result.(model.Vector)
+		if !ok || vec.Len() == 0 {
+			return false
+		}
+		val = float64(vec[0].Value)
+		return val >= minVal
+	}, 35*time.Second, 2*time.Second, "metric %s did not reach >= %v", promql, minVal)
+	return val
+}
+
 // --- 場景 A：NATS Queue ---
 func TestScenarioA_NATSQueue(t *testing.T) {
 	v := vmAPI(t)
-	val := queryScalar(t, v,
-		`traces_service_graph_request_total{client="order-service",server="payment-service",connection_type="nats",edge_relation="link"}`)
+	val := queryScalarEventually(t, v,
+		`traces_service_graph_request_total{client="order-service",server="payment-service",connection_type="nats",edge_relation="link"}`, 1)
 	assert.GreaterOrEqual(t, val, float64(1))
 }
 
 // --- 場景 B：MongoDB Change Stream ---
 func TestScenarioB_MongoDBChangeStream(t *testing.T) {
 	v := vmAPI(t)
-	val := queryScalar(t, v,
-		`traces_service_graph_request_total{client="order-service",server="sync-service",connection_type="mongodb",edge_relation="link"}`)
+	val := queryScalarEventually(t, v,
+		`traces_service_graph_request_total{client="order-service",server="sync-service",connection_type="mongodb",edge_relation="link"}`, 1)
 	assert.GreaterOrEqual(t, val, float64(1))
 }
 
@@ -61,8 +82,8 @@ func TestScenarioC_NATSFanOut(t *testing.T) {
 	v := vmAPI(t)
 	for _, server := range []string{"payment-svc", "inventory-svc", "notification-svc"} {
 		t.Run(server, func(t *testing.T) {
-			val := queryScalar(t, v, fmt.Sprintf(
-				`traces_service_graph_request_total{client="event-source",server="%s",edge_relation="link"}`, server))
+			val := queryScalarEventually(t, v, fmt.Sprintf(
+				`traces_service_graph_request_total{client="event-source",server="%s",edge_relation="link"}`, server), 1)
 			assert.GreaterOrEqual(t, val, float64(1))
 		})
 	}
@@ -71,38 +92,38 @@ func TestScenarioC_NATSFanOut(t *testing.T) {
 // --- 場景 D：跨批次到達 ---
 func TestScenarioD_CrossBatch(t *testing.T) {
 	v := vmAPI(t)
-	val := queryScalar(t, v,
-		`traces_service_graph_request_total{client="delayed-producer",server="eager-consumer",edge_relation="link"}`)
+	val := queryScalarEventually(t, v,
+		`traces_service_graph_request_total{client="delayed-producer",server="eager-consumer",edge_relation="link"}`, 1)
 	assert.GreaterOrEqual(t, val, float64(1))
 }
 
 // --- 場景 E：Retry ---
 func TestScenarioE_Retry(t *testing.T) {
 	v := vmAPI(t)
-	val := queryScalar(t, v,
-		`traces_service_graph_request_total{client="order-service",server="order-service",edge_relation="link"}`)
+	val := queryScalarEventually(t, v,
+		`traces_service_graph_request_total{client="order-service",server="order-service",edge_relation="link"}`, 1)
 	assert.GreaterOrEqual(t, val, float64(1))
 }
 
 // --- Histogram 驗證 ---
 func TestHistograms(t *testing.T) {
 	v := vmAPI(t)
-
+	// PRW exporter appends unit to OTel metric names (unit "ms" → _milliseconds); VM stores e.g. traces_service_graph_request_server_milliseconds_count
 	t.Run("server_histogram_count", func(t *testing.T) {
-		val := queryScalar(t, v,
-			`count(traces_service_graph_request_server_count{edge_relation="link"})`)
+		val := queryScalarEventually(t, v,
+			`count(traces_service_graph_request_server_milliseconds_count{edge_relation="link"})`, 0.5)
 		assert.Greater(t, val, float64(0))
 	})
 
 	t.Run("client_histogram_count", func(t *testing.T) {
-		val := queryScalar(t, v,
-			`count(traces_service_graph_request_client_count{edge_relation="link"})`)
+		val := queryScalarEventually(t, v,
+			`count(traces_service_graph_request_client_milliseconds_count{edge_relation="link"})`, 0.5)
 		assert.Greater(t, val, float64(0))
 	})
 
 	t.Run("server_histogram_sum_positive", func(t *testing.T) {
-		val := queryScalar(t, v,
-			`sum(traces_service_graph_request_server_sum{edge_relation="link"})`)
+		val := queryScalarEventually(t, v,
+			`sum(traces_service_graph_request_server_milliseconds_sum{edge_relation="link"})`, 0.5)
 		assert.Greater(t, val, float64(0), "server duration sum should be > 0")
 	})
 }
@@ -112,14 +133,14 @@ func TestScenarioF_MixedMiddleware(t *testing.T) {
 	v := vmAPI(t)
 
 	t.Run("nats_leg", func(t *testing.T) {
-		val := queryScalar(t, v,
-			`traces_service_graph_request_total{client="order-service",server="payment-service",connection_type="nats",edge_relation="link"}`)
+		val := queryScalarEventually(t, v,
+			`traces_service_graph_request_total{client="order-service",server="payment-service",connection_type="nats",edge_relation="link"}`, 1)
 		assert.GreaterOrEqual(t, val, float64(1))
 	})
 
 	t.Run("mongodb_leg", func(t *testing.T) {
-		val := queryScalar(t, v,
-			`traces_service_graph_request_total{client="payment-service",server="sync-service",connection_type="mongodb",edge_relation="link"}`)
+		val := queryScalarEventually(t, v,
+			`traces_service_graph_request_total{client="payment-service",server="sync-service",connection_type="mongodb",edge_relation="link"}`, 1)
 		assert.GreaterOrEqual(t, val, float64(1))
 	})
 }

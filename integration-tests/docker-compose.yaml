@@ -38,5 +38,6 @@ services:
   verify:
     build:
       context: verify
+    depends_on: [testapp]
     environment:
       VM_URL: http://victoriametrics:8428
