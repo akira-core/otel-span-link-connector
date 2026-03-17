@@ -21,11 +21,12 @@ func makeKey(traceIDSuffix, spanIDSuffix byte) SpanKey {
 
 func makeSpanInfo(svc string) SpanInfo {
 	return SpanInfo{
-		ServiceName: svc,
-		StartTime:   pcommon.Timestamp(1000),
-		EndTime:     pcommon.Timestamp(2000),
-		StatusCode:  ptrace.StatusCodeOk,
-		Attributes:  pcommon.NewMap(),
+		ServiceName:        svc,
+		StartTime:          pcommon.Timestamp(1000),
+		EndTime:            pcommon.Timestamp(2000),
+		StatusCode:         ptrace.StatusCodeOk,
+		Attributes:         pcommon.NewMap(),
+		ResourceAttributes: pcommon.NewMap(),
 	}
 }
 

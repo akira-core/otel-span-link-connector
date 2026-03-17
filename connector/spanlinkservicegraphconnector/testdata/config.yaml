@@ -5,6 +5,8 @@ spanlinkservicegraph:
       source_attribute: messaging.system
     - name: link_type
       source_attribute: link_type
+    - name: deployment_environment
+      source_attribute: deployment.environment
   store:
     ttl: 30s
     max_items: 10000

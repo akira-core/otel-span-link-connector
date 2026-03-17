@@ -21,6 +21,8 @@ connectors:
         source_attribute: db.namespace
       - name: link_type
         source_attribute: link_type
+      - name: deployment_environment
+        source_attribute: deployment.environment
 
 exporters:
   prometheusremotewrite:

@@ -27,11 +27,13 @@ func TestLoadConfig(t *testing.T) {
 	assert.Equal(t, 2*time.Second, cfg.StoreExpirationLoop)
 	assert.Equal(t, 60*time.Second, *cfg.MetricsFlushInterval)
 
-	require.Len(t, cfg.Dimensions, 2)
+	require.Len(t, cfg.Dimensions, 3)
 	assert.Equal(t, "messaging_system", cfg.Dimensions[0].Name)
 	assert.Equal(t, "messaging.system", cfg.Dimensions[0].SourceAttribute)
 	assert.Equal(t, "link_type", cfg.Dimensions[1].Name)
 	assert.Equal(t, "link_type", cfg.Dimensions[1].SourceAttribute)
+	assert.Equal(t, "deployment_environment", cfg.Dimensions[2].Name)
+	assert.Equal(t, "deployment.environment", cfg.Dimensions[2].SourceAttribute)
 
 	require.Len(t, cfg.LatencyHistogramBuckets, 11)
 }

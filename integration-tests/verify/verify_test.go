@@ -61,7 +61,7 @@ func queryScalarEventually(t *testing.T, v1api promv1.API, promql string, minVal
 	return val
 }
 
-// --- 場景 A：NATS Queue ---
+// --- Scenario A: NATS Queue ---
 func TestScenarioA_NATSQueue(t *testing.T) {
 	v := vmAPI(t)
 	val := queryScalarEventually(t, v,
@@ -69,7 +69,7 @@ func TestScenarioA_NATSQueue(t *testing.T) {
 	assert.GreaterOrEqual(t, val, float64(1))
 }
 
-// --- 場景 B：MongoDB Change Stream ---
+// --- Scenario B: MongoDB Change Stream ---
 func TestScenarioB_MongoDBChangeStream(t *testing.T) {
 	v := vmAPI(t)
 	val := queryScalarEventually(t, v,
@@ -77,7 +77,7 @@ func TestScenarioB_MongoDBChangeStream(t *testing.T) {
 	assert.GreaterOrEqual(t, val, float64(1))
 }
 
-// --- 場景 C：NATS Fan-out ---
+// --- Scenario C: NATS Fan-out ---
 func TestScenarioC_NATSFanOut(t *testing.T) {
 	v := vmAPI(t)
 	for _, server := range []string{"payment-svc", "inventory-svc", "notification-svc"} {
@@ -89,7 +89,7 @@ func TestScenarioC_NATSFanOut(t *testing.T) {
 	}
 }
 
-// --- 場景 D：跨批次到達 ---
+// --- Scenario D: Cross-batch ---
 func TestScenarioD_CrossBatch(t *testing.T) {
 	v := vmAPI(t)
 	val := queryScalarEventually(t, v,
@@ -97,7 +97,7 @@ func TestScenarioD_CrossBatch(t *testing.T) {
 	assert.GreaterOrEqual(t, val, float64(1))
 }
 
-// --- 場景 E：Retry ---
+// --- Scenario E: Retry ---
 func TestScenarioE_Retry(t *testing.T) {
 	v := vmAPI(t)
 	val := queryScalarEventually(t, v,
@@ -105,10 +105,9 @@ func TestScenarioE_Retry(t *testing.T) {
 	assert.GreaterOrEqual(t, val, float64(1))
 }
 
-// --- Histogram 驗證 ---
+// --- Histogram verification ---
 func TestHistograms(t *testing.T) {
 	v := vmAPI(t)
-	// PRW exporter appends unit to OTel metric names (unit "ms" → _milliseconds); VM stores e.g. traces_service_graph_request_server_milliseconds_count
 	t.Run("server_histogram_count", func(t *testing.T) {
 		val := queryScalarEventually(t, v,
 			`count(traces_service_graph_request_server_milliseconds_count{edge_relation="link"})`, 0.5)
@@ -128,7 +127,7 @@ func TestHistograms(t *testing.T) {
 	})
 }
 
-// --- Mixed middleware（NATS + MongoDB） ---
+// --- Mixed middleware (NATS + MongoDB) ---
 func TestScenarioF_MixedMiddleware(t *testing.T) {
 	v := vmAPI(t)
 
@@ -141,6 +140,42 @@ func TestScenarioF_MixedMiddleware(t *testing.T) {
 	t.Run("mongodb_leg", func(t *testing.T) {
 		val := queryScalarEventually(t, v,
 			`traces_service_graph_request_total{client="payment-service",server="sync-service",connection_type="mongodb",edge_relation="link"}`, 1)
+		assert.GreaterOrEqual(t, val, float64(1))
+	})
+}
+
+// --- Prefixed dimension labels ---
+func TestPrefixedDimensions_LinkType(t *testing.T) {
+	v := vmAPI(t)
+	// link_type from link attrs should appear as client_link_type and server_link_type
+	val := queryScalarEventually(t, v,
+		`traces_service_graph_request_total{client="order-service",server="payment-service",client_link_type="queue_enq_deq",server_link_type="queue_enq_deq"}`, 1)
+	assert.GreaterOrEqual(t, val, float64(1))
+}
+
+func TestPrefixedDimensions_MessagingSystem(t *testing.T) {
+	v := vmAPI(t)
+	// messaging.system from span attrs should appear as client_messaging_system and server_messaging_system
+	val := queryScalarEventually(t, v,
+		`traces_service_graph_request_total{client="order-service",server="payment-service",client_messaging_system="nats",server_messaging_system=""}`, 1)
+	assert.GreaterOrEqual(t, val, float64(1))
+}
+
+// --- Resource attribute dimension ---
+func TestResourceAttributeDimension(t *testing.T) {
+	v := vmAPI(t)
+
+	t.Run("scenario_A_deployment_env", func(t *testing.T) {
+		// order-service has deployment.environment=staging, payment-service has production
+		val := queryScalarEventually(t, v,
+			`traces_service_graph_request_total{client="order-service",server="payment-service",client_deployment_environment="staging",server_deployment_environment="production"}`, 1)
+		assert.GreaterOrEqual(t, val, float64(1))
+	})
+
+	t.Run("scenario_E_self_ref_same_env", func(t *testing.T) {
+		// order-service retry: both sides are staging
+		val := queryScalarEventually(t, v,
+			`traces_service_graph_request_total{client="order-service",server="order-service",client_deployment_environment="staging",server_deployment_environment="staging"}`, 1)
 		assert.GreaterOrEqual(t, val, float64(1))
 	})
 }

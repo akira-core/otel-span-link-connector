@@ -12,21 +12,23 @@ func findServiceName(resource pcommon.Resource) string {
 	return v.Str()
 }
 
-func resolveConnectionType(linkAttrs, dstAttrs, srcAttrs pcommon.Map) string {
+func resolveConnectionType(linkAttrs, dstAttrs, srcAttrs, dstResourceAttrs, srcResourceAttrs pcommon.Map) string {
 	if v, ok := linkAttrs.Get("connection_type"); ok && v.Str() != "" {
 		return v.Str()
 	}
-	if v := firstNonEmptyAttr("messaging.system", linkAttrs, dstAttrs, srcAttrs); v != "" {
+	if v := firstNonEmptyAttr("messaging.system", linkAttrs, dstAttrs, srcAttrs, dstResourceAttrs, srcResourceAttrs); v != "" {
 		return v
 	}
-	if v := firstNonEmptyAttr("db.system", linkAttrs, dstAttrs, srcAttrs); v != "" {
+	if v := firstNonEmptyAttr("db.system", linkAttrs, dstAttrs, srcAttrs, dstResourceAttrs, srcResourceAttrs); v != "" {
 		return v
 	}
 	return ""
 }
 
-func resolveDimension(dim Dimension, linkAttrs, dstAttrs, srcAttrs pcommon.Map) string {
-	return firstNonEmptyAttr(dim.SourceAttribute, linkAttrs, dstAttrs, srcAttrs)
+// resolveDimensionForSide resolves a dimension value for one side of an edge
+// (client or server). Priority: resource attrs > span attrs > link attrs.
+func resolveDimensionForSide(dim Dimension, resourceAttrs, spanAttrs, linkAttrs pcommon.Map) string {
+	return firstNonEmptyAttr(dim.SourceAttribute, resourceAttrs, spanAttrs, linkAttrs)
 }
 
 func firstNonEmptyAttr(key string, maps ...pcommon.Map) string {

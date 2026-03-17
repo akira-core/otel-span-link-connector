@@ -48,6 +48,9 @@ func buildTrace(resources ...resourceDef) ptrace.Traces {
 	for _, r := range resources {
 		rs := td.ResourceSpans().AppendEmpty()
 		rs.Resource().Attributes().PutStr("service.name", r.serviceName)
+		for k, v := range r.resourceAttrs {
+			rs.Resource().Attributes().PutStr(k, v)
+		}
 		ss := rs.ScopeSpans().AppendEmpty()
 		for _, s := range r.spans {
 			span := ss.Spans().AppendEmpty()
@@ -74,8 +77,9 @@ func buildTrace(resources ...resourceDef) ptrace.Traces {
 }
 
 type resourceDef struct {
-	serviceName string
-	spans       []spanDef
+	serviceName   string
+	resourceAttrs map[string]string
+	spans         []spanDef
 }
 
 type spanDef struct {
@@ -194,6 +198,39 @@ func assertEdgeRelation(t *testing.T, metrics []pmetric.Metrics) {
 	}
 }
 
+// assertDimensionValue checks that a specific prefixed dimension label has the expected value
+// on the first matching data point for the given metric/client/server.
+func assertDimensionValue(t *testing.T, metrics []pmetric.Metrics, metricName, client, server, dimKey, expected string) {
+	t.Helper()
+	for _, md := range metrics {
+		for i := 0; i < md.ResourceMetrics().Len(); i++ {
+			for j := 0; j < md.ResourceMetrics().At(i).ScopeMetrics().Len(); j++ {
+				sm := md.ResourceMetrics().At(i).ScopeMetrics().At(j)
+				for k := 0; k < sm.Metrics().Len(); k++ {
+					m := sm.Metrics().At(k)
+					if m.Name() != metricName {
+						continue
+					}
+					if m.Type() == pmetric.MetricTypeSum {
+						for d := 0; d < m.Sum().DataPoints().Len(); d++ {
+							dp := m.Sum().DataPoints().At(d)
+							c, _ := dp.Attributes().Get("client")
+							s, _ := dp.Attributes().Get("server")
+							if c.Str() == client && s.Str() == server {
+								v, ok := dp.Attributes().Get(dimKey)
+								assert.True(t, ok, "dimension %s missing", dimKey)
+								assert.Equal(t, expected, v.Str(), "dimension %s", dimKey)
+								return
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	t.Errorf("metric %s{client=%s, server=%s} not found for dimension check %s", metricName, client, server, dimKey)
+}
+
 // Scenario A: Kafka message queue link
 func TestConsumeTraces_KafkaLink(t *testing.T) {
 	cfg := defaultTestConfig()
@@ -233,6 +270,10 @@ func TestConsumeTraces_KafkaLink(t *testing.T) {
 	assertHistogramExists(t, metrics, metricReqServerHist, "order-service", "payment-service", 1)
 	assertHistogramExists(t, metrics, metricReqClientHist, "order-service", "payment-service", 1)
 	assertEdgeRelation(t, metrics)
+	assertDimensionValue(t, metrics, metricReqTotal, "order-service", "payment-service", "client_messaging_system", "kafka")
+	assertDimensionValue(t, metrics, metricReqTotal, "order-service", "payment-service", "server_messaging_system", "kafka")
+	assertDimensionValue(t, metrics, metricReqTotal, "order-service", "payment-service", "client_link_type", "queue_enq_deq")
+	assertDimensionValue(t, metrics, metricReqTotal, "order-service", "payment-service", "server_link_type", "queue_enq_deq")
 }
 
 // Scenario B: MongoDB change stream
@@ -273,9 +314,11 @@ func TestConsumeTraces_MongoDBChangeStream(t *testing.T) {
 
 	assertMetricValue(t, metrics, metricReqTotal, "order-service", "sync-service", 1)
 	assertEdgeRelation(t, metrics)
+	assertDimensionValue(t, metrics, metricReqTotal, "order-service", "sync-service", "client_db_system", "mongodb")
+	assertDimensionValue(t, metrics, metricReqTotal, "order-service", "sync-service", "server_db_system", "mongodb")
 }
 
-// Scenario C: Batch processing (N links → N edges)
+// Scenario C: Batch processing (N links -> N edges)
 func TestConsumeTraces_BatchProcessing(t *testing.T) {
 	cfg := defaultTestConfig()
 	conn, sink := newTestConnector(t, cfg)
@@ -568,6 +611,8 @@ func TestConsumeTraces_NATSLink(t *testing.T) {
 	require.Len(t, metrics, 1)
 
 	assertMetricValue(t, metrics, metricReqTotal, "publisher-svc", "subscriber-svc", 1)
+	assertDimensionValue(t, metrics, metricReqTotal, "publisher-svc", "subscriber-svc", "client_messaging_system", "nats")
+	assertDimensionValue(t, metrics, metricReqTotal, "publisher-svc", "subscriber-svc", "server_messaging_system", "nats")
 }
 
 func TestConnector_StartStop(t *testing.T) {
@@ -589,4 +634,168 @@ func TestConnector_StartStop(t *testing.T) {
 
 	err = conn.Shutdown(context.Background())
 	require.NoError(t, err)
+}
+
+// Test resource attributes are used for dimensions
+func TestConsumeTraces_ResourceAttributeDimension(t *testing.T) {
+	cfg := createDefaultConfig().(*Config)
+	cfg.Dimensions = []Dimension{
+		{Name: "deployment_env", SourceAttribute: "deployment.environment"},
+		{Name: "messaging_system", SourceAttribute: "messaging.system"},
+	}
+	conn, sink := newTestConnector(t, cfg)
+	defer func() { require.NoError(t, conn.Shutdown(context.Background())) }()
+
+	td := buildTrace(
+		resourceDef{
+			serviceName:   "order-service",
+			resourceAttrs: map[string]string{"deployment.environment": "staging"},
+			spans: []spanDef{{
+				traceID: tid(1), spanID: sid(1),
+				startTime: 1000, endTime: 2000,
+				kind: ptrace.SpanKindProducer,
+			}},
+		},
+		resourceDef{
+			serviceName:   "payment-service",
+			resourceAttrs: map[string]string{"deployment.environment": "production"},
+			spans: []spanDef{{
+				traceID: tid(2), spanID: sid(2),
+				startTime: 3000, endTime: 5000,
+				kind:  ptrace.SpanKindConsumer,
+				links: []linkDef{{traceID: tid(1), spanID: sid(1)}},
+			}},
+		},
+	)
+
+	require.NoError(t, conn.ConsumeTraces(context.Background(), td))
+	metrics := sink.AllMetrics()
+	require.Len(t, metrics, 1)
+
+	assertMetricValue(t, metrics, metricReqTotal, "order-service", "payment-service", 1)
+	assertDimensionValue(t, metrics, metricReqTotal, "order-service", "payment-service", "client_deployment_env", "staging")
+	assertDimensionValue(t, metrics, metricReqTotal, "order-service", "payment-service", "server_deployment_env", "production")
+}
+
+// Test resource attrs have precedence over span attrs
+func TestConsumeTraces_ResourceAttrsPrecedenceOverSpan(t *testing.T) {
+	cfg := createDefaultConfig().(*Config)
+	cfg.Dimensions = []Dimension{
+		{Name: "messaging_system", SourceAttribute: "messaging.system"},
+	}
+	conn, sink := newTestConnector(t, cfg)
+	defer func() { require.NoError(t, conn.Shutdown(context.Background())) }()
+
+	td := buildTrace(
+		resourceDef{
+			serviceName:   "producer-svc",
+			resourceAttrs: map[string]string{"messaging.system": "from-resource"},
+			spans: []spanDef{{
+				traceID: tid(1), spanID: sid(1),
+				startTime: 1000, endTime: 2000,
+				kind:  ptrace.SpanKindProducer,
+				attrs: map[string]string{"messaging.system": "from-span"},
+			}},
+		},
+		resourceDef{
+			serviceName: "consumer-svc",
+			spans: []spanDef{{
+				traceID: tid(2), spanID: sid(2),
+				startTime: 3000, endTime: 5000,
+				kind:  ptrace.SpanKindConsumer,
+				links: []linkDef{{traceID: tid(1), spanID: sid(1)}},
+			}},
+		},
+	)
+
+	require.NoError(t, conn.ConsumeTraces(context.Background(), td))
+	metrics := sink.AllMetrics()
+	require.Len(t, metrics, 1)
+
+	// Resource attrs should take precedence for the client side
+	assertDimensionValue(t, metrics, metricReqTotal, "producer-svc", "consumer-svc", "client_messaging_system", "from-resource")
+}
+
+// Test link attrs serve as fallback for dimensions (e.g., link_type)
+func TestConsumeTraces_LinkAttrsFallback(t *testing.T) {
+	cfg := createDefaultConfig().(*Config)
+	cfg.Dimensions = []Dimension{
+		{Name: "link_type", SourceAttribute: "link_type"},
+	}
+	conn, sink := newTestConnector(t, cfg)
+	defer func() { require.NoError(t, conn.Shutdown(context.Background())) }()
+
+	td := buildTrace(
+		resourceDef{serviceName: "svc-a", spans: []spanDef{{
+			traceID: tid(1), spanID: sid(1),
+			startTime: 1000, endTime: 2000,
+			kind: ptrace.SpanKindProducer,
+		}}},
+		resourceDef{serviceName: "svc-b", spans: []spanDef{{
+			traceID: tid(2), spanID: sid(2),
+			startTime: 3000, endTime: 5000,
+			kind: ptrace.SpanKindConsumer,
+			links: []linkDef{{
+				traceID: tid(1), spanID: sid(1),
+				attrs: map[string]string{"link_type": "queue_enq_deq"},
+			}},
+		}}},
+	)
+
+	require.NoError(t, conn.ConsumeTraces(context.Background(), td))
+	metrics := sink.AllMetrics()
+	require.Len(t, metrics, 1)
+
+	// Both sides should pick up link_type from link attrs as fallback
+	assertDimensionValue(t, metrics, metricReqTotal, "svc-a", "svc-b", "client_link_type", "queue_enq_deq")
+	assertDimensionValue(t, metrics, metricReqTotal, "svc-a", "svc-b", "server_link_type", "queue_enq_deq")
+}
+
+// Test different dimension values produce separate metric series (buildMetricKey includes dims)
+func TestConsumeTraces_DifferentDimensionsSeparateSeries(t *testing.T) {
+	cfg := createDefaultConfig().(*Config)
+	cfg.Dimensions = []Dimension{
+		{Name: "messaging_system", SourceAttribute: "messaging.system"},
+	}
+	conn, sink := newTestConnector(t, cfg)
+	defer func() { require.NoError(t, conn.Shutdown(context.Background())) }()
+
+	td := buildTrace(
+		// Source spans
+		resourceDef{serviceName: "producer", spans: []spanDef{
+			{traceID: tid(1), spanID: sid(1), startTime: 1000, endTime: 2000, kind: ptrace.SpanKindProducer,
+				attrs: map[string]string{"messaging.system": "kafka"}},
+			{traceID: tid(2), spanID: sid(2), startTime: 1000, endTime: 2000, kind: ptrace.SpanKindProducer,
+				attrs: map[string]string{"messaging.system": "nats"}},
+		}},
+		// Consumer links to both
+		resourceDef{serviceName: "consumer", spans: []spanDef{
+			{traceID: tid(3), spanID: sid(3), startTime: 3000, endTime: 4000, kind: ptrace.SpanKindConsumer,
+				attrs: map[string]string{"messaging.system": "kafka"},
+				links: []linkDef{{traceID: tid(1), spanID: sid(1)}}},
+			{traceID: tid(4), spanID: sid(4), startTime: 3000, endTime: 4000, kind: ptrace.SpanKindConsumer,
+				attrs: map[string]string{"messaging.system": "nats"},
+				links: []linkDef{{traceID: tid(2), spanID: sid(2)}}},
+		}},
+	)
+
+	require.NoError(t, conn.ConsumeTraces(context.Background(), td))
+	metrics := sink.AllMetrics()
+	require.Len(t, metrics, 1)
+
+	// Should have two separate metric data points (kafka and nats should not be merged)
+	md := metrics[0]
+	var totalDPs int
+	for i := 0; i < md.ResourceMetrics().Len(); i++ {
+		for j := 0; j < md.ResourceMetrics().At(i).ScopeMetrics().Len(); j++ {
+			sm := md.ResourceMetrics().At(i).ScopeMetrics().At(j)
+			for k := 0; k < sm.Metrics().Len(); k++ {
+				m := sm.Metrics().At(k)
+				if m.Name() == metricReqTotal {
+					totalDPs = m.Sum().DataPoints().Len()
+				}
+			}
+		}
+	}
+	assert.Equal(t, 2, totalDPs, "different messaging_system values should produce separate series")
 }
