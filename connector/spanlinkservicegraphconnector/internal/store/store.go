@@ -17,11 +17,12 @@ type SpanKey struct {
 
 // SpanInfo holds the essential information about an indexed span.
 type SpanInfo struct {
-	ServiceName string
-	StartTime   pcommon.Timestamp
-	EndTime     pcommon.Timestamp
-	StatusCode  ptrace.StatusCode
-	Attributes  pcommon.Map
+	ServiceName        string
+	StartTime          pcommon.Timestamp
+	EndTime            pcommon.Timestamp
+	StatusCode         ptrace.StatusCode
+	Attributes         pcommon.Map
+	ResourceAttributes pcommon.Map
 }
 
 // PendingEdge represents an unresolved link waiting for its source span.

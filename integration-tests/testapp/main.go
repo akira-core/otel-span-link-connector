@@ -83,17 +83,30 @@ type tracers struct {
 }
 
 func newTracers(exp sdktrace.SpanExporter) *tracers {
-	services := []string{
-		"order-service", "payment-service", "sync-service", "event-source",
-		"payment-svc", "inventory-svc", "notification-svc",
-		"delayed-producer", "eager-consumer",
+	type svcDef struct {
+		name string
+		env  string
+	}
+	services := []svcDef{
+		{name: "order-service", env: "staging"},
+		{name: "payment-service", env: "production"},
+		{name: "sync-service", env: "production"},
+		{name: "event-source", env: "staging"},
+		{name: "payment-svc", env: "production"},
+		{name: "inventory-svc", env: "production"},
+		{name: "notification-svc", env: "production"},
+		{name: "delayed-producer", env: "staging"},
+		{name: "eager-consumer", env: "staging"},
 	}
 	t := &tracers{m: make(map[string]trace.Tracer)}
 	for _, svc := range services {
-		res, _ := resource.Merge(resource.Default(), resource.NewWithAttributes(semconv.SchemaURL, semconv.ServiceNameKey.String(svc)))
+		res, _ := resource.Merge(resource.Default(), resource.NewWithAttributes(semconv.SchemaURL,
+			semconv.ServiceNameKey.String(svc.name),
+			attribute.String("deployment.environment", svc.env),
+		))
 		tp := sdktrace.NewTracerProvider(sdktrace.WithBatcher(exp), sdktrace.WithResource(res))
 		t.providers = append(t.providers, tp)
-		t.m[svc] = tp.Tracer("testapp")
+		t.m[svc.name] = tp.Tracer("testapp")
 	}
 	return t
 }

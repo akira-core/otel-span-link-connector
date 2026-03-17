@@ -17,6 +17,9 @@ connectors:
   # Span Link Service Graph — derives edges from span links
   spanlinkservicegraph:
     latency_histogram_buckets: [5ms, 10ms, 25ms, 50ms, 100ms, 250ms, 500ms, 1s, 2s, 5s, 10s]
+    # Each dimension produces two prefixed labels: client_<name> and server_<name>,
+    # resolved independently from each side's resource attributes, span attributes,
+    # then link attributes (as shared fallback).
     dimensions:
       - name: messaging_system
         source_attribute: messaging.system
@@ -28,6 +31,8 @@ connectors:
         source_attribute: db.namespace
       - name: link_type
         source_attribute: link_type
+      - name: deployment_environment
+        source_attribute: deployment.environment
     store:
       ttl: 30s
       max_items: 10000

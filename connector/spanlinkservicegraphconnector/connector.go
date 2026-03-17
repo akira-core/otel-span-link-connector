@@ -114,6 +114,7 @@ func (c *serviceGraphConnector) aggregateMetrics(td ptrace.Traces) {
 	for i := 0; i < rss.Len(); i++ {
 		rs := rss.At(i)
 		serviceName := findServiceName(rs.Resource())
+		resourceAttrs := c.extractRelevantResourceAttributes(rs.Resource())
 		sss := rs.ScopeSpans()
 		for j := 0; j < sss.Len(); j++ {
 			spans := sss.At(j).Spans()
@@ -125,11 +126,12 @@ func (c *serviceGraphConnector) aggregateMetrics(td ptrace.Traces) {
 				}
 
 				info := store.SpanInfo{
-					ServiceName: serviceName,
-					StartTime:   span.StartTimestamp(),
-					EndTime:     span.EndTimestamp(),
-					StatusCode:  span.Status().Code(),
-					Attributes:  c.extractRelevantAttributes(span),
+					ServiceName:        serviceName,
+					StartTime:          span.StartTimestamp(),
+					EndTime:            span.EndTimestamp(),
+					StatusCode:         span.Status().Code(),
+					Attributes:         c.extractRelevantAttributes(span),
+					ResourceAttributes: resourceAttrs,
 				}
 
 				c.spanIndex.Put(key, info)
@@ -147,6 +149,7 @@ func (c *serviceGraphConnector) aggregateMetrics(td ptrace.Traces) {
 	for i := 0; i < rss.Len(); i++ {
 		rs := rss.At(i)
 		dstService := findServiceName(rs.Resource())
+		dstResourceAttrs := c.extractRelevantResourceAttributes(rs.Resource())
 		sss := rs.ScopeSpans()
 		for j := 0; j < sss.Len(); j++ {
 			spans := sss.At(j).Spans()
@@ -158,11 +161,12 @@ func (c *serviceGraphConnector) aggregateMetrics(td ptrace.Traces) {
 				}
 
 				dstSpanInfo := store.SpanInfo{
-					ServiceName: dstService,
-					StartTime:   span.StartTimestamp(),
-					EndTime:     span.EndTimestamp(),
-					StatusCode:  span.Status().Code(),
-					Attributes:  c.extractRelevantAttributes(span),
+					ServiceName:        dstService,
+					StartTime:          span.StartTimestamp(),
+					EndTime:            span.EndTimestamp(),
+					StatusCode:         span.Status().Code(),
+					Attributes:         c.extractRelevantAttributes(span),
+					ResourceAttributes: dstResourceAttrs,
 				}
 
 				for l := 0; l < links.Len(); l++ {
@@ -190,8 +194,10 @@ func (c *serviceGraphConnector) aggregateMetrics(td ptrace.Traces) {
 func (c *serviceGraphConnector) onLinkResolved(clientService, serverService string, srcInfo, dstInfo *store.SpanInfo, linkAttrs pcommon.Map) {
 	srcAttrs := srcInfo.Attributes
 	dstAttrs := dstInfo.Attributes
+	srcResourceAttrs := srcInfo.ResourceAttributes
+	dstResourceAttrs := dstInfo.ResourceAttributes
 
-	connectionType := resolveConnectionType(linkAttrs, dstAttrs, srcAttrs)
+	connectionType := resolveConnectionType(linkAttrs, dstAttrs, srcAttrs, dstResourceAttrs, srcResourceAttrs)
 	failed := dstInfo.StatusCode == ptrace.StatusCodeError
 
 	dims := make(map[string]string)
@@ -206,10 +212,11 @@ func (c *serviceGraphConnector) onLinkResolved(clientService, serverService stri
 	}
 
 	for _, dim := range c.config.Dimensions {
-		dims[dim.Name] = resolveDimension(dim, linkAttrs, dstAttrs, srcAttrs)
+		dims["client_"+dim.Name] = resolveDimensionForSide(dim, srcResourceAttrs, srcAttrs, linkAttrs)
+		dims["server_"+dim.Name] = resolveDimensionForSide(dim, dstResourceAttrs, dstAttrs, linkAttrs)
 	}
 
-	metricKey := buildMetricKey(dims)
+	metricKey := c.buildMetricKey(dims)
 
 	c.seriesMu.Lock()
 	series, ok := c.keyToMetric[metricKey]
@@ -365,10 +372,8 @@ func (c *serviceGraphConnector) storeExpirationLoop() {
 	}
 }
 
-func (c *serviceGraphConnector) extractRelevantAttributes(span ptrace.Span) pcommon.Map {
-	attrs := pcommon.NewMap()
-
-	relevantKeys := map[string]struct{}{
+func (c *serviceGraphConnector) relevantKeys() map[string]struct{} {
+	keys := map[string]struct{}{
 		"messaging.system":           {},
 		"messaging.destination.name": {},
 		"db.system":                  {},
@@ -377,11 +382,16 @@ func (c *serviceGraphConnector) extractRelevantAttributes(span ptrace.Span) pcom
 		"link_type":                  {},
 	}
 	for _, dim := range c.config.Dimensions {
-		relevantKeys[dim.SourceAttribute] = struct{}{}
+		keys[dim.SourceAttribute] = struct{}{}
 	}
+	return keys
+}
 
+func (c *serviceGraphConnector) extractRelevantAttributes(span ptrace.Span) pcommon.Map {
+	attrs := pcommon.NewMap()
+	keys := c.relevantKeys()
 	span.Attributes().Range(func(k string, v pcommon.Value) bool {
-		if _, ok := relevantKeys[k]; ok {
+		if _, ok := keys[k]; ok {
 			v.CopyTo(attrs.PutEmpty(k))
 		}
 		return true
@@ -389,14 +399,30 @@ func (c *serviceGraphConnector) extractRelevantAttributes(span ptrace.Span) pcom
 	return attrs
 }
 
-func buildMetricKey(dims map[string]string) string {
-	return fmt.Sprintf("%s→%s|%s|%s|%s",
+func (c *serviceGraphConnector) extractRelevantResourceAttributes(resource pcommon.Resource) pcommon.Map {
+	attrs := pcommon.NewMap()
+	keys := c.relevantKeys()
+	resource.Attributes().Range(func(k string, v pcommon.Value) bool {
+		if _, ok := keys[k]; ok {
+			v.CopyTo(attrs.PutEmpty(k))
+		}
+		return true
+	})
+	return attrs
+}
+
+func (c *serviceGraphConnector) buildMetricKey(dims map[string]string) string {
+	key := fmt.Sprintf("%s→%s|%s|%s|%s",
 		dims["client"],
 		dims["server"],
 		dims["connection_type"],
 		dims["failed"],
 		dims["edge_relation"],
 	)
+	for _, dim := range c.config.Dimensions {
+		key += "|" + dims["client_"+dim.Name] + "|" + dims["server_"+dim.Name]
+	}
+	return key
 }
 
 func setDimensionAttributes(dest pcommon.Map, dims map[string]string) {
