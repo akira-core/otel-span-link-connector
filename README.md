@@ -16,6 +16,12 @@ docs/                                       # Design plan & contribution guide
 examples/                                   # Collector config & docker-compose
 ```
 
+## Documentation
+
+- **[專案說明與程式結構](docs/project-explanation.md)** — 專案用途、資料流、程式碼結構與核心方法說明（繁體中文）。
+- [Design plan](docs/design-plan.md) — 設計計畫與應用端 span link 規範。
+- [Contribution guide](docs/contrib-guide.md) — 捐贈至 opentelemetry-collector-contrib 的流程。
+
 ## Quick Start
 
 ```bash
