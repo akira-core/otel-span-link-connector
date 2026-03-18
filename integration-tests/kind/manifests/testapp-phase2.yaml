@@ -1,0 +1,27 @@
+# Phase2 testapp: reuses the existing integration-tests/testapp with K8s service endpoints
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: testapp-phase2
+  namespace: default
+  labels:
+    app: testapp-phase2
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: testapp-phase2
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: testapp
+          image: testapp-phase2:latest
+          imagePullPolicy: Never
+          env:
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "otel-collector.default.svc.cluster.local:4317"
+            - name: NATS_URL
+              value: "nats://nats.default.svc.cluster.local:4222"
+            - name: MONGODB_URI
+              value: "mongodb://mongodb.default.svc.cluster.local:27017/?replicaSet=rs0"

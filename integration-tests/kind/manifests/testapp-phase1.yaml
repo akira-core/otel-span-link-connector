@@ -1,0 +1,55 @@
+# Job A: order-service (producer + consumer in-process with span links)
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: testapp-order-service
+  namespace: default
+  labels:
+    app: testapp-phase1
+    scenario: order-service
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: testapp-phase1
+        scenario: order-service
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: testapp
+          image: testapp-phase1:latest
+          imagePullPolicy: Never
+          env:
+            - name: SERVICE_NAME
+              value: "order-service"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "otel-collector.default.svc.cluster.local:4317"
+---
+# Job B: payment-service (another in-process pair with different service name)
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: testapp-payment-service
+  namespace: default
+  labels:
+    app: testapp-phase1
+    scenario: payment-service
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: testapp-phase1
+        scenario: payment-service
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: testapp
+          image: testapp-phase1:latest
+          imagePullPolicy: Never
+          env:
+            - name: SERVICE_NAME
+              value: "payment-service"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "otel-collector.default.svc.cluster.local:4317"
